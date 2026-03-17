@@ -7,36 +7,69 @@
 
 using namespace std;
 
-// board
+// ansi escape codes
+#define RESET       "\033[0m"
+#define BOLD        "\033[1m"
+#define DIM         "\033[2m"
+#define GREEN       "\033[32m"
+#define RED         "\033[31m"
+#define YELLOW      "\033[33m"
+#define CYAN        "\033[36m"
+#define MAGENTA     "\033[35m"
+#define WHITE       "\033[37m"
 
-void displayBoard(bool tiles[]){
-    cout << "\n  +---+---+---+---+---+---+---+---+---+" << endl;
-    cout << "  |";
-    for(int i = 1; i <= 9; i++){
-        if(tiles[i]) cout << " " << i << " |";
-        else         cout << " X |";
-    }
-    cout << endl;
-    cout << "  +---+---+---+---+---+---+---+---+---+" << endl;
-    cout << "    1   2   3   4   5   6   7   8   9" << endl;
+// box width (inner visible chars between the two ║)
+#define BOX_W 56
+
+// game state
+struct GameState{
+    bool tiles[10];      // tiles[1..9]
+    int turns = 0;
+    int dice1 = 0;
+    int dice2 = 0;
+    int diceTotal = 0;
+    int numDice = 2;
+    bool endless = false;
+    bool reopenMode = false;
+    string message = "";
+    string messageColor = WHITE;
+};
+
+// clear screen
+void clearScreen(){
+    system("clear");
+}
+
+// print a row: ║ <content padded to BOX_W> ║
+// visLen = how many visible characters are in content (excluding ANSI codes)
+void boxRow(const string& content, int visLen){
+    cout << CYAN << "  ║" << RESET << content;
+    int pad = BOX_W - visLen;
+    for(int i = 0; i < pad; i++) cout << " ";
+    cout << CYAN << "║" << RESET << endl;
+}
+
+void boxTop(){
+    cout << CYAN << "  ╔";
+    for(int i = 0; i < BOX_W; i++) cout << "═";
+    cout << "╗" << RESET << endl;
+}
+
+void boxMid(){
+    cout << CYAN << "  ╠";
+    for(int i = 0; i < BOX_W; i++) cout << "═";
+    cout << "╣" << RESET << endl;
+}
+
+void boxBot(){
+    cout << CYAN << "  ╚";
+    for(int i = 0; i < BOX_W; i++) cout << "═";
+    cout << "╝" << RESET << endl;
 }
 
 // dice
-
 int rollDie(){
     return (rand() % 6) + 1;
-}
-
-int rollDice(int n){
-    int total = 0;
-    cout << "  Rolled: ";
-    for(int i = 0; i < n; i++){
-        int d = rollDie();
-        cout << "[" << d << "]";
-        total += d;
-    }
-    cout << "  =  " << total << endl;
-    return total;
 }
 
 bool anyTileAbove6(bool tiles[]){
@@ -47,36 +80,34 @@ bool anyTileAbove6(bool tiles[]){
 }
 
 // combinations
-
-// Find all subsets of open tiles that sum to target
-void findCombinations(vector<int>& open, int idx, int target,
+void findCombinations(vector<int>& pool, int idx, int target,
                       vector<int>& current, vector<vector<int>>& results){
     if(target == 0){
         results.push_back(current);
         return;
     }
-    for(int i = idx; i < (int)open.size(); i++){
-        if(open[i] <= target){
-            current.push_back(open[i]);
-            findCombinations(open, i + 1, target - open[i], current, results);
+    for(int i = idx; i < (int)pool.size(); i++){
+        if(pool[i] <= target){
+            current.push_back(pool[i]);
+            findCombinations(pool, i + 1, target - pool[i], current, results);
             current.pop_back();
         }
     }
 }
 
-vector<vector<int>> getValidCombinations(int roll, bool tiles[]){
-    vector<int> open;
+vector<vector<int>> getValidCombinations(int roll, bool tiles[], bool pickClosed){
+    vector<int> pool;
     for(int i = 1; i <= 9; i++){
-        if(tiles[i]) open.push_back(i);
+        if(pickClosed && !tiles[i])  pool.push_back(i);
+        if(!pickClosed && tiles[i])  pool.push_back(i);
     }
     vector<vector<int>> results;
     vector<int> current;
-    findCombinations(open, 0, roll, current, results);
+    findCombinations(pool, 0, roll, current, results);
     return results;
 }
 
 // input
-
 vector<int> parseTiles(const string& input){
     vector<int> chosen;
     istringstream ss(input);
@@ -87,121 +118,426 @@ vector<int> parseTiles(const string& input){
     return chosen;
 }
 
-bool validateChoice(const vector<int>& chosen, int roll, bool tiles[]){
-    // check range and uniqueness
+// score
+int calculateScore(bool tiles[]){
+    int s = 0;
+    for(int i = 1; i <= 9; i++){
+        if(tiles[i]) s += i;
+    }
+    return s;
+}
+
+bool allClosed(bool tiles[]){
+    for(int i = 1; i <= 9; i++){
+        if(tiles[i]) return false;
+    }
+    return true;
+}
+
+// draw UI
+void drawUI(GameState& gs){
+    clearScreen();
+
+    string modeLabel = gs.endless ? "ENDLESS" : "CLASSIC";
+
+    // title
+    boxTop();
+    // center "S H U T   T H E   B O X"  (25 visible chars)
+    string title = "S H U T   T H E   B O X";
+    int titlePad = (BOX_W - (int)title.size()) / 2;
+    string titleLine = "";
+    for(int i = 0; i < titlePad; i++) titleLine += " ";
+    titleLine += string(BOLD) + WHITE + title + RESET;
+    boxRow(titleLine, titlePad + (int)title.size());
+
+    // mode label
+    string modeLine = "[ " + modeLabel + " MODE ]";
+    int modePad = (BOX_W - (int)modeLine.size()) / 2;
+    string modeStr = "";
+    for(int i = 0; i < modePad; i++) modeStr += " ";
+    modeStr += string(DIM) + modeLine + RESET;
+    boxRow(modeStr, modePad + (int)modeLine.size());
+
+    boxMid();
+
+    // tiles - each tile is "┌───┐" = 5 visible chars, with 1 space between = 53 + some padding
+    // 9 tiles * 5 = 45, + 8 spaces = 53
+    // left pad = (BOX_W - 53) / 2 = 1 (with BOX_W=56, pad=1, right=2)
+    int tileAreaW = 9 * 5 + 8; // 53
+    int tileLPad = (BOX_W - tileAreaW) / 2;
+
+    // top border row
+    string topRow = "";
+    for(int i = 0; i < tileLPad; i++) topRow += " ";
+    for(int i = 1; i <= 9; i++){
+        if(gs.tiles[i]) topRow += string(GREEN) + "┌───┐" + RESET;
+        else            topRow += string(DIM) + RED + "┌───┐" + RESET;
+        if(i < 9) topRow += " ";
+    }
+    boxRow(topRow, tileLPad + tileAreaW);
+
+    // value row
+    string valRow = "";
+    for(int i = 0; i < tileLPad; i++) valRow += " ";
+    for(int i = 1; i <= 9; i++){
+        if(gs.tiles[i]) valRow += string(GREEN) + BOLD + "│ " + to_string(i) + " │" + RESET;
+        else            valRow += string(DIM) + RED + "│ X │" + RESET;
+        if(i < 9) valRow += " ";
+    }
+    boxRow(valRow, tileLPad + tileAreaW);
+
+    // bottom border row
+    string botRow = "";
+    for(int i = 0; i < tileLPad; i++) botRow += " ";
+    for(int i = 1; i <= 9; i++){
+        if(gs.tiles[i]) botRow += string(GREEN) + "└───┘" + RESET;
+        else            botRow += string(DIM) + RED + "└───┘" + RESET;
+        if(i < 9) botRow += " ";
+    }
+    boxRow(botRow, tileLPad + tileAreaW);
+
+    // number row
+    string numRow = "";
+    for(int i = 0; i < tileLPad; i++) numRow += " ";
+    for(int i = 1; i <= 9; i++){
+        numRow += "  " + to_string(i) + "  ";
+        if(i < 9) numRow += " ";
+    }
+    boxRow(numRow, tileLPad + tileAreaW);
+
+    boxMid();
+
+    // dice section
+    if(gs.diceTotal > 0){
+        // build dice display
+        // each die: ┌───┐ / │ N │ / └───┘ = 5 visible chars
+        // total line: "  Rolled: " + dice + "  =  N" 
+        // "  Rolled: " = 10,  "  =  " = 5,  digit = 1-2
+        string totalStr = to_string(gs.diceTotal);
+
+        // line 1: top of dice
+        string d1 = "  " + string(CYAN) + BOLD + "Rolled: " + RESET;
+        d1 += string(YELLOW) + "┌───┐" + RESET;
+        int visLen1 = 10 + 5;
+        if(gs.numDice == 2){
+            d1 += " ";
+            d1 += string(YELLOW) + "┌───┐" + RESET;
+            visLen1 += 1 + 5;
+        }
+        boxRow(d1, visLen1);
+
+        // line 2: value of dice + total
+        string d2 = "          "; // 10 spaces to align under "Rolled: "
+        d2 += string(YELLOW) + "│ " + BOLD + to_string(gs.dice1) + RESET + YELLOW + " │" + RESET;
+        int visLen2 = 10 + 5;
+        if(gs.numDice == 2){
+            d2 += " ";
+            d2 += string(YELLOW) + "│ " + BOLD + to_string(gs.dice2) + RESET + YELLOW + " │" + RESET;
+            visLen2 += 1 + 5;
+        }
+        d2 += "  =  " + string(BOLD) + WHITE + totalStr + RESET;
+        visLen2 += 5 + (int)totalStr.size();
+        boxRow(d2, visLen2);
+
+        // line 3: bottom of dice
+        string d3 = "          "; // 10 spaces
+        d3 += string(YELLOW) + "└───┘" + RESET;
+        int visLen3 = 10 + 5;
+        if(gs.numDice == 2){
+            d3 += " ";
+            d3 += string(YELLOW) + "└───┘" + RESET;
+            visLen3 += 1 + 5;
+        }
+        boxRow(d3, visLen3);
+    }else{
+        string rolling = "  Rolling " + to_string(gs.numDice) + " dice...";
+        boxRow(rolling, (int)rolling.size());
+    }
+
+    // message section
+    boxMid();
+    if(!gs.message.empty()){
+        string msg = gs.message;
+        if((int)msg.size() > BOX_W - 4) msg = msg.substr(0, BOX_W - 4);
+        string line = "  " + string(gs.messageColor.c_str()) + msg + RESET;
+        boxRow(line, 2 + (int)msg.size());
+    }else{
+        boxRow("", 0);
+    }
+
+    boxBot();
+    cout << endl;
+}
+
+// validate choice
+bool validateChoice(const vector<int>& chosen, int roll, bool tiles[], bool pickClosed, string& errMsg){
     for(int t : chosen){
         if(t < 1 || t > 9){
-            cout << "  ! Tile " << t << " is out of range (1-9)." << endl;
+            errMsg = "Tile " + to_string(t) + " is out of range (1-9)";
             return false;
         }
-        if(!tiles[t]){
-            cout << "  ! Tile " << t << " is already closed." << endl;
+        if(!pickClosed && !tiles[t]){
+            errMsg = "Tile " + to_string(t) + " is already closed";
+            return false;
+        }
+        if(pickClosed && tiles[t]){
+            errMsg = "Tile " + to_string(t) + " is already open";
             return false;
         }
     }
-    // check for duplicates
     vector<int> sorted = chosen;
     sort(sorted.begin(), sorted.end());
     for(int i = 1; i < (int)sorted.size(); i++){
         if(sorted[i] == sorted[i-1]){
-            cout << "  ! Duplicate tile " << sorted[i] << "." << endl;
+            errMsg = "Duplicate tile " + to_string(sorted[i]);
             return false;
         }
     }
-    // check sum
     int sum = 0;
     for(int t : chosen) sum += t;
     if(sum != roll){
-        cout << "  ! Tiles sum to " << sum << ", but you need " << roll << "." << endl;
+        errMsg = "Tiles sum to " + to_string(sum) + ", need " + to_string(roll);
         return false;
     }
     return true;
 }
 
-void closeTiles(bool tiles[], const vector<int>& chosen){
-    for(int t : chosen) tiles[t] = false;
+// menu
+int showMenu(){
+    clearScreen();
+    boxTop();
+
+    string title = "S H U T   T H E   B O X";
+    int titlePad = (BOX_W - (int)title.size()) / 2;
+    string titleLine = "";
+    for(int i = 0; i < titlePad; i++) titleLine += " ";
+    titleLine += string(BOLD) + WHITE + title + RESET;
+    boxRow(titleLine, titlePad + (int)title.size());
+
+    boxMid();
+    boxRow("", 0);
+
+    string opt1 = "    " + string(GREEN) + BOLD + "[1]" + RESET + "  Classic Mode";
+    boxRow(opt1, 4 + 3 + 14); // 21
+    string sub1 = "         " + string(DIM) + "Shut all 9 tiles to win" + RESET;
+    boxRow(sub1, 9 + 23); // 32
+    boxRow("", 0);
+
+    string opt2 = "    " + string(MAGENTA) + BOLD + "[2]" + RESET + "  Endless Mode";
+    boxRow(opt2, 4 + 3 + 14);
+    string sub2 = "         " + string(DIM) + "Play forever, reopen tiles" + RESET;
+    boxRow(sub2, 9 + 26); // 35
+    boxRow("", 0);
+
+    string opt3 = "    " + string(RED) + BOLD + "[q]" + RESET + "  Quit";
+    boxRow(opt3, 4 + 3 + 6); // 13
+    boxRow("", 0);
+
+    boxBot();
+    cout << endl;
+    cout << "  Choose: ";
+
+    string input;
+    if(!getline(cin, input)) return 0;
+    if(input == "1") return 1;
+    if(input == "2") return 2;
+    if(input == "q" || input == "Q") return 0;
+    return -1;
 }
 
-// score
-
-int calculateScore(bool tiles[]){
-    int score = 0;
-    for(int i = 1; i <= 9; i++){
-        if(tiles[i]) score += i;
+// game over screen
+void showGameOver(GameState& gs, bool won){
+    drawUI(gs);
+    cout << endl;
+    if(won){
+        cout << GREEN << BOLD << "  ★ SHUT THE BOX! Perfect score: 0 ★" << RESET << endl;
+    }else{
+        int sc = calculateScore(gs.tiles);
+        cout << RED << BOLD << "  Game Over!" << RESET << " Final Score: " << BOLD << sc << RESET << endl;
+        cout << DIM << "  (Lower is better. 0 = perfect)" << RESET << endl;
     }
-    return score;
+    cout << WHITE << "  Total turns: " << gs.turns << RESET << endl;
+    cout << endl;
+    cout << "  Press ENTER to continue...";
+    string dummy;
+    getline(cin, dummy);
 }
 
-bool allClosed(bool tiles[]){
-    for(int i = 1; i <= 9; i++){
-        if(tiles[i]) return true;
-    }
-    return false;
-}
-
-// round
-
-void playRound(){
-    bool tiles[10];  // tiles[1..9]
-    for(int i = 1; i <= 9; i++) tiles[i] = true;
-
-    cout << "\n  ============================================" << endl;
-    cout << "         S H U T   T H E   B O X" << endl;
-    cout << "  ============================================" << endl;
+// classic mode
+void playClassic(){
+    GameState gs;
+    gs.endless = false;
+    for(int i = 1; i <= 9; i++) gs.tiles[i] = true;
 
     while(true){
-        displayBoard(tiles);
+        gs.numDice = anyTileAbove6(gs.tiles) ? 2 : 1;
+        gs.reopenMode = false;
 
-        // decide how many dice
-        int numDice = anyTileAbove6(tiles) ? 2 : 1;
-        if(numDice == 1) cout << "\n  (All tiles 7-9 are closed — rolling 1 die)" << endl;
-        cout << endl;
+        // roll immediately, no enter needed
+        gs.dice1 = rollDie();
+        gs.dice2 = (gs.numDice == 2) ? rollDie() : 0;
+        gs.diceTotal = gs.dice1 + gs.dice2;
+        gs.turns++;
 
-        int roll = rollDice(numDice);
-
-        // check if any valid move exists
-        vector<vector<int>> combos = getValidCombinations(roll, tiles);
+        // check valid combos
+        vector<vector<int>> combos = getValidCombinations(gs.diceTotal, gs.tiles, false);
         if(combos.empty()){
-            displayBoard(tiles);
-            int score = calculateScore(tiles);
-            cout << "\n  No valid moves for a roll of " << roll << "." << endl;
-            cout << "  ----------------------------------------" << endl;
-            if(score == 0){
-                cout << "  *** SHUT THE BOX! Perfect score! ***" << endl;
-            }else{
-                cout << "  Game over!  Your score: " << score << endl;
-                cout << "  (Lower is better. 0 = perfect)" << endl;
-            }
-            cout << "  ----------------------------------------" << endl;
+            gs.message = "No valid moves!";
+            gs.messageColor = RED;
+            showGameOver(gs, false);
             return;
         }
 
-        // player input loop
+        // input loop
         while(true){
-            cout << "  Choose tiles to close (space-separated): ";
+            gs.message = "Close tiles that sum to " + to_string(gs.diceTotal);
+            gs.messageColor = GREEN;
+            drawUI(gs);
+
+            cout << "  > ";
             string line;
             if(!getline(cin, line)){
                 cout << endl;
-                return;  // EOF / stream closed
+                return;
             }
             if(line.empty()) continue;
 
             vector<int> chosen = parseTiles(line);
             if(chosen.empty()){
-                cout << "  ! No tiles entered." << endl;
+                gs.message = "No tiles entered";
+                gs.messageColor = YELLOW;
                 continue;
             }
-            if(!validateChoice(chosen, roll, tiles)) continue;
 
-            closeTiles(tiles, chosen);
+            string errMsg;
+            if(!validateChoice(chosen, gs.diceTotal, gs.tiles, false, errMsg)){
+                gs.message = errMsg;
+                gs.messageColor = RED;
+                continue;
+            }
+
+            for(int t : chosen) gs.tiles[t] = false;
             break;
         }
 
         // win check
-        if(!allClosed(tiles)){
-            displayBoard(tiles);
-            cout << "\n  *** SHUT THE BOX! You win with a perfect score! ***" << endl;
+        if(allClosed(gs.tiles)){
+            gs.message = "ALL TILES SHUT!";
+            gs.messageColor = GREEN;
+            showGameOver(gs, true);
             return;
+        }
+    }
+}
+
+// endless mode
+void playEndless(){
+    GameState gs;
+    gs.endless = true;
+    for(int i = 1; i <= 9; i++) gs.tiles[i] = true;
+
+    while(true){
+        gs.numDice = anyTileAbove6(gs.tiles) ? 2 : 1;
+        gs.reopenMode = false;
+
+        // roll immediately
+        gs.dice1 = rollDie();
+        gs.dice2 = (gs.numDice == 2) ? rollDie() : 0;
+        gs.diceTotal = gs.dice1 + gs.dice2;
+        gs.turns++;
+
+        // check close combos first
+        vector<vector<int>> closeCombos = getValidCombinations(gs.diceTotal, gs.tiles, false);
+
+        if(closeCombos.empty()){
+            // check reopen combos
+            vector<vector<int>> reopenCombos = getValidCombinations(gs.diceTotal, gs.tiles, true);
+            if(reopenCombos.empty()){
+                gs.message = "No moves at all! Rolling again...";
+                gs.messageColor = YELLOW;
+                drawUI(gs);
+                continue;
+            }
+
+            // reopen mode
+            gs.reopenMode = true;
+            while(true){
+                gs.message = "REOPEN closed tiles summing to " + to_string(gs.diceTotal);
+                gs.messageColor = MAGENTA;
+                drawUI(gs);
+
+                cout << MAGENTA << "  REOPEN > " << RESET;
+                string line;
+                if(!getline(cin, line)){
+                    cout << endl;
+                    return;
+                }
+                if(line == "q" || line == "Q") return;
+                if(line.empty()) continue;
+
+                vector<int> chosen = parseTiles(line);
+                if(chosen.empty()){
+                    gs.message = "No tiles entered";
+                    gs.messageColor = YELLOW;
+                    continue;
+                }
+
+                string errMsg;
+                if(!validateChoice(chosen, gs.diceTotal, gs.tiles, true, errMsg)){
+                    gs.message = errMsg;
+                    gs.messageColor = RED;
+                    continue;
+                }
+
+                for(int t : chosen) gs.tiles[t] = true;  // reopen
+                break;
+            }
+        }else{
+            // normal close mode
+            while(true){
+                gs.message = "Close tiles that sum to " + to_string(gs.diceTotal);
+                gs.messageColor = GREEN;
+                drawUI(gs);
+
+                cout << "  > ";
+                string line;
+                if(!getline(cin, line)){
+                    cout << endl;
+                    return;
+                }
+                if(line == "q" || line == "Q") return;
+                if(line.empty()) continue;
+
+                vector<int> chosen = parseTiles(line);
+                if(chosen.empty()){
+                    gs.message = "No tiles entered";
+                    gs.messageColor = YELLOW;
+                    continue;
+                }
+
+                string errMsg;
+                if(!validateChoice(chosen, gs.diceTotal, gs.tiles, false, errMsg)){
+                    gs.message = errMsg;
+                    gs.messageColor = RED;
+                    continue;
+                }
+
+                for(int t : chosen) gs.tiles[t] = false;
+                break;
+            }
+        }
+
+        // all closed in endless = reset and keep going
+        if(allClosed(gs.tiles)){
+            gs.diceTotal = 0;
+            gs.message = "ALL SHUT! Tiles reset!";
+            gs.messageColor = GREEN;
+            drawUI(gs);
+            cout << GREEN << BOLD << "  ★ SHUT THE BOX! Resetting tiles... ★" << RESET << endl;
+            cout << "  Press ENTER to continue...";
+            string d;
+            getline(cin, d);
+            for(int i = 1; i <= 9; i++) gs.tiles[i] = true;
         }
     }
 }
@@ -210,14 +546,14 @@ int main(){
     randomizeSeed();
 
     while(true){
-        playRound();
-
-        cout << "\n  Play again? (y/n): ";
-        string answer;
-        getline(cin, answer);
-        if(answer != "y" && answer != "Y") break;
+        int choice = showMenu();
+        if(choice == 0) break;
+        if(choice == 1) playClassic();
+        else if(choice == 2) playEndless();
     }
 
-    cout << "\n  Thanks for playing Shut the Box!\n" << endl;
+    clearScreen();
+    cout << CYAN << BOLD << "  Thanks for playing Shut the Box!" << RESET << endl;
+    cout << endl;
     return 0;
 }
