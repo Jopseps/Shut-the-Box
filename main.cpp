@@ -95,11 +95,12 @@ void findCombinations(vector<int>& pool, int idx, int target,
     }
 }
 
-vector<vector<int>> getValidCombinations(int roll, bool tiles[], bool pickClosed){
+vector<vector<int>> getValidCombinations(int roll, bool tiles[], int mode){
     vector<int> pool;
     for(int i = 1; i <= 9; i++){
-        if(pickClosed && !tiles[i])  pool.push_back(i);
-        if(!pickClosed && tiles[i])  pool.push_back(i);
+        if(mode == 0 && tiles[i])  pool.push_back(i);        // open only
+        else if(mode == 1 && !tiles[i])  pool.push_back(i);   // closed only
+        else if(mode == 2) pool.push_back(i);                // all tiles
     }
     vector<vector<int>> results;
     vector<int> current;
@@ -270,19 +271,17 @@ void drawUI(GameState& gs){
 }
 
 // validate choice
-bool validateChoice(const vector<int>& chosen, int roll, bool tiles[], bool pickClosed, string& errMsg){
+bool validateChoice(const vector<int>& chosen, int roll, bool tiles[], bool endlessToggle, string& errMsg){
     for(int t : chosen){
         if(t < 1 || t > 9){
             errMsg = "Tile " + to_string(t) + " is out of range (1-9)";
             return false;
         }
-        if(!pickClosed && !tiles[t]){
-            errMsg = "Tile " + to_string(t) + " is already closed";
-            return false;
-        }
-        if(pickClosed && tiles[t]){
-            errMsg = "Tile " + to_string(t) + " is already open";
-            return false;
+        if(!endlessToggle){
+            if(!tiles[t]){
+                errMsg = "Tile " + to_string(t) + " is already closed";
+                return false;
+            }
         }
     }
     vector<int> sorted = chosen;
@@ -380,7 +379,7 @@ void playClassic(){
         gs.turns++;
 
         // check valid combos
-        vector<vector<int>> combos = getValidCombinations(gs.diceTotal, gs.tiles, false);
+        vector<vector<int>> combos = getValidCombinations(gs.diceTotal, gs.tiles, 0);
         if(combos.empty()){
             gs.message = "No valid moves!";
             gs.messageColor = RED;
@@ -434,10 +433,11 @@ void playClassic(){
 void playEndless(){
     GameState gs;
     gs.endless = true;
-    for(int i = 1; i <= 9; i++) gs.tiles[i] = true;
+    for(int i = 1; i <= 12; i++) gs.tiles[i] = true;
 
     while(true){
-        gs.numDice = anyTileAbove6(gs.tiles) ? 2 : 1;
+        // gs.numDice = anyTileAbove6(gs.tiles) ? 2 : 1;
+        gs.numDice = 2;
         gs.reopenMode = false;
 
         // roll immediately
@@ -446,98 +446,63 @@ void playEndless(){
         gs.diceTotal = gs.dice1 + gs.dice2;
         gs.turns++;
 
-        // check close combos first
-        vector<vector<int>> closeCombos = getValidCombinations(gs.diceTotal, gs.tiles, false);
+        // check combos (using all tiles)
+        vector<vector<int>> combos = getValidCombinations(gs.diceTotal, gs.tiles, 2);
 
-        if(closeCombos.empty()){
-            // check reopen combos
-            vector<vector<int>> reopenCombos = getValidCombinations(gs.diceTotal, gs.tiles, true);
-            if(reopenCombos.empty()){
-                gs.message = "No moves at all! Rolling again...";
+        if(combos.empty()){
+            gs.message = "No moves at all! Rolling again...";
+            gs.messageColor = YELLOW;
+            drawUI(gs);
+            cout << "  Press ENTER to continue...";
+            string d;
+            getline(cin, d);
+            continue;
+        }
+
+        // toggle mode
+        while(true){
+            gs.message = "Toggle tiles that sum to " + to_string(gs.diceTotal);
+            gs.messageColor = CYAN;
+            drawUI(gs);
+
+            cout << "  > ";
+            string line;
+            if(!getline(cin, line)){
+                cout << endl;
+                return;
+            }
+            if(line == "q" || line == "Q") return;
+            if(line.empty()) continue;
+
+            vector<int> chosen = parseTiles(line);
+            if(chosen.empty()){
+                gs.message = "No tiles entered";
                 gs.messageColor = YELLOW;
-                drawUI(gs);
                 continue;
             }
 
-            // reopen mode
-            gs.reopenMode = true;
-            while(true){
-                gs.message = "REOPEN closed tiles summing to " + to_string(gs.diceTotal);
-                gs.messageColor = MAGENTA;
-                drawUI(gs);
-
-                cout << MAGENTA << "  REOPEN > " << RESET;
-                string line;
-                if(!getline(cin, line)){
-                    cout << endl;
-                    return;
-                }
-                if(line == "q" || line == "Q") return;
-                if(line.empty()) continue;
-
-                vector<int> chosen = parseTiles(line);
-                if(chosen.empty()){
-                    gs.message = "No tiles entered";
-                    gs.messageColor = YELLOW;
-                    continue;
-                }
-
-                string errMsg;
-                if(!validateChoice(chosen, gs.diceTotal, gs.tiles, true, errMsg)){
-                    gs.message = errMsg;
-                    gs.messageColor = RED;
-                    continue;
-                }
-
-                for(int t : chosen) gs.tiles[t] = true;  // reopen
-                break;
+            string errMsg;
+            if(!validateChoice(chosen, gs.diceTotal, gs.tiles, true, errMsg)){
+                gs.message = errMsg;
+                gs.messageColor = RED;
+                continue;
             }
-        }else{
-            // normal close mode
-            while(true){
-                gs.message = "Close tiles that sum to " + to_string(gs.diceTotal);
-                gs.messageColor = GREEN;
-                drawUI(gs);
 
-                cout << "  > ";
-                string line;
-                if(!getline(cin, line)){
-                    cout << endl;
-                    return;
-                }
-                if(line == "q" || line == "Q") return;
-                if(line.empty()) continue;
-
-                vector<int> chosen = parseTiles(line);
-                if(chosen.empty()){
-                    gs.message = "No tiles entered";
-                    gs.messageColor = YELLOW;
-                    continue;
-                }
-
-                string errMsg;
-                if(!validateChoice(chosen, gs.diceTotal, gs.tiles, false, errMsg)){
-                    gs.message = errMsg;
-                    gs.messageColor = RED;
-                    continue;
-                }
-
-                for(int t : chosen) gs.tiles[t] = false;
-                break;
-            }
+            for(int t : chosen) gs.tiles[t] = !gs.tiles[t];  // toggle state
+            break;
         }
 
         // all closed in endless = reset and keep going
         if(allClosed(gs.tiles)){
             gs.diceTotal = 0;
-            gs.message = "ALL SHUT! Tiles reset!";
+            gs.message = "ALL SHUT! Tiles reset! Finished in " + to_string(gs.turns) + " turns";
             gs.messageColor = GREEN;
             drawUI(gs);
             cout << GREEN << BOLD << "  ★ SHUT THE BOX! Resetting tiles... ★" << RESET << endl;
             cout << "  Press ENTER to continue...";
             string d;
             getline(cin, d);
-            for(int i = 1; i <= 9; i++) gs.tiles[i] = true;
+            for(int i = 1; i <= 12; i++) gs.tiles[i] = true;
         }
     }
 }
