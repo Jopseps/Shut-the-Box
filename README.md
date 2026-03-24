@@ -14,11 +14,23 @@ You have 9 tiles numbered 1–9, all starting open. Each turn, roll the dice and
 - You can toggle the tiles instead of just closing them.
 - Always roll **2 dice**.
 
-## Build & Run
+## Build & Install
+
+You can build and install the game globally using CMake. Once installed, you can launch the game from anywhere by typing `shuttb`.
 
 ```bash
-g++ main.cpp -o main
-./main
+mkdir build
+cd build
+cmake ..
+make
+sudo make install
+```
+
+## Run
+
+After installing:
+```bash
+shuttb
 ```
 
 ## Input
